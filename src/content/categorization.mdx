@@ -1,0 +1,70 @@
+## Where it fits in Soundboard
+
+Every transaction a user imports has to be sorted into the right accounting category. This
+agent reads each transaction's description, type, amount, merchant, and date, and writes a
+category assignment back that feeds the rest of the bookkeeping product.
+
+## Problem and origin
+
+The original implementation ran on the OpenAI Assistants API. It worked, but it had three
+problems: it was slow (around 20 seconds per transaction), accuracy plateaued at about 90%,
+and the vendor abstraction gave me very little control over how decisions were made or how to
+improve them. Everything happened inside a black box with no observability into why it was
+failing. I rebuilt it from scratch.
+
+## Constraints
+
+The system has to stay auditable: every category decision needs to be explainable, not a
+black-box guess. It also can't invent categories. The model is constrained to the client's
+existing category list and can never propose one outside it, checked programmatically after
+the call rather than trusted from the prompt.
+
+## Architecture
+
+The rebuild is a hybrid retrieval system. Exact matches from Postgres on normalized
+description and transaction type run first, and only fall back to similarity search in Qdrant
+(OpenAI's `text-embedding-3-large`) if there aren't enough exact matches. Retrieval itself
+stays precise and rule-based on purpose, description and type only, not fuzzy business logic.
+
+Amount, merchant, and date come in one layer up, as context handed to the LLM specifically for
+disambiguation, effectively a lightweight re-ranking step: when retrieved candidates carry
+conflicting categories, the model uses amount and date proximity to reason about things like
+recurring monthly charges before committing to an answer. That keeps retrieval and reasoning
+cleanly separated, and keeps the output consistent and auditable instead of varying run to run.
+
+For transactions with no similar past history at all, retrieval comes back empty and the
+system routes to a separate cold-start agent with more reasoning latitude and on-demand web
+search, since there's no internal history to ground a decision in. Tool access there is scoped
+rather than open-ended: the agent is meant to identify a business and its likely category, not
+conduct freeform research. Once a bookkeeper confirms a category from this path, it becomes a
+real Postgres/Qdrant entry, so that merchant is no longer a cold-start case going forward. The
+fallback path naturally shrinks as the corpus grows.
+
+## Key decisions and tradeoffs
+
+Separating retrieval (description and type only) from disambiguation (amount, merchant, date)
+was the central decision. It would have been simpler to hand everything to the LLM in one
+pass, but keeping retrieval rule-based and precise, and reserving the model for genuine
+disambiguation, is what makes the output consistent and auditable instead of varying run to
+run.
+
+## Evaluation and reliability
+
+Beyond the end-to-end accuracy figure, I measure retrieval quality on its own. The accuracy
+number reflects final output correctness, it doesn't by itself say whether retrieval surfaced
+the right comparison transactions or the LLM reasoned its way to a correct answer despite
+weaker candidates. Using bookkeeper corrections as ground truth, I check whether the correct
+category was actually present among the retrieved candidates for that transaction, which
+separates a retrieval failure from a reasoning failure instead of only seeing that the final
+output was right or wrong.
+
+## Results
+
+Latency dropped from about 20 seconds to about 3. Accuracy went from 90% to 99%, measured by
+comparing the system's categories against user-verified categories. The system also improves
+over time: every user correction feeds straight back into the retrieval corpus and sharpens
+future categorizations.
+
+## What I'd do differently
+
+TODO.

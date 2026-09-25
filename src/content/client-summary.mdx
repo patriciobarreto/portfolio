@@ -1,0 +1,78 @@
+## Where it fits in Soundboard
+
+This is the client operations side of Soundboard. It reads from seven sources across three
+systems (the internal database, QuickBooks, and HubSpot) and writes a single AI-generated
+summary that a preparer reads before a client call or filing.
+
+## Problem and origin
+
+This came directly from a tax preparer complaint raised in a routine client meeting: as client
+count grew, preparers were spending about 30 minutes per client just piecing together context
+before every call or filing. I asked preparers directly what they actually needed: company
+basics, a business summary, financials, recurring concerns or open questions, and past meeting
+history. I mapped those needs to real data sources: the internal database (Q&A, deduction
+tasks, onboarding form), QuickBooks (financials), and HubSpot (meeting notes, client notes,
+emails).
+
+## Constraints
+
+The financials in the summary can never be hallucinated. Every number and claim has to trace
+back to real source data, nothing generated from memory or guesswork, since preparers act on
+this directly with clients. The system also has to run reliably against real client data, so
+partial failures need to degrade safely rather than silently produce a wrong summary.
+
+## Architecture
+
+A multi-agent pipeline: TypeScript owns orchestration, state, and reliability; Python owns
+prompt construction and LLM calls. One agent per source, and each source adapter normalizes
+its input and decides independently whether an LLM call is even needed. A final synthesis
+agent ties the per-source sections into one summary.
+
+QuickBooks financials are always computed in code and shown as a chart, never LLM-narrated.
+That's clearer and more trustworthy for a preparer than a model describing numbers, and it
+guarantees the summary can never surface a hallucinated figure.
+
+The hardest part of the build is the follow-ups and recurring-concerns system. Each source has
+its own agent that classifies new activity into themes. A theme joiner agent matches new theme
+mentions against existing topics, or creates a new topic if nothing matches. A final follow-ups
+agent decides whether a topic is now resolved or still open. For context efficiency, when a
+topic gets touched by a new update, the theme joiner and follow-ups agent only receive that
+topic's full stored history, not the entire follow-up state across every topic in the client's
+history.
+
+Each source tracks a timestamp of when it last ran. On refresh, each source pulls and
+processes only what's new since its own last-run timestamp, and sources with no updates since
+then don't run at all. Reliability is built in from day one, since this runs against real
+client data: leased job claims with heartbeats, automatic retries, duplicate-request detection
+via payload hash reuse, and full audit logging of every LLM call's prompt, cost, and output.
+Runs move through queued, running, completed, partial, and failed states, with two-hour run
+deadlines, two-minute leases, thirty-second heartbeats, and recovery sweeps.
+
+Corrections are handled by a routing agent that sends feedback to the Source, Final, Meeting,
+or Email agent depending on what the correction applies to, and recurring corrections become
+directive records.
+
+## Key decisions and tradeoffs
+
+The deterministic/LLM split for financials was the non-negotiable design constraint: it costs
+some flexibility (the model can't narrate around a number that looks odd) in exchange for a
+hard guarantee that a summary can never surface a hallucinated figure. The incremental,
+timestamp-based refresh model traded a simpler always-rerun design for a large cost reduction,
+at the cost of more bookkeeping around per-source state.
+
+## Evaluation and reliability
+
+Measured cost impact of the incremental refresh: a first run compared to one month of
+incremental updates on the same client dropped from about 80 cents to about 10 cents, roughly
+an 8x reduction for that comparison. That's a measured example tied to how much actually
+changed since the last run, not a fixed rate.
+
+## Results
+
+Review time dropped from about 30 minutes to about 5 minutes per client. Every number and claim
+in a summary traces back to real source data. Designed, built, and shipped solo as
+Soundboard's sole engineer.
+
+## What I'd do differently
+
+TODO.

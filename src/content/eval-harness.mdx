@@ -1,0 +1,40 @@
+## Where it fits in Soundboard
+
+Internal engineering infrastructure that sits alongside every agent in Soundboard. It reads a
+golden dataset and each agent's live output, and writes a regression report comparing the two
+against a baseline.
+
+## Problem and origin
+
+With multiple LLM agents in production (tax filing, categorization, client summaries, Ops
+Q&A), I needed a way to catch regressions before they reached production instead of finding out
+from a user. I designed a golden-dataset regression-testing framework for LLM agents and used
+it to evaluate the production agents directly.
+
+## Constraints
+
+TODO.
+
+## Architecture
+
+The framework scores agent output against a golden dataset two ways: exact-match scoring where
+a precise answer is expected, and LLM-as-judge scoring where the correct output is more
+open-ended. Results are compared against a stored baseline to flag regressions automatically
+rather than requiring a manual before/after read.
+
+## Key decisions and tradeoffs
+
+TODO.
+
+## Evaluation and reliability
+
+TODO.
+
+## Results
+
+Used in production to evaluate Soundboard's live agents, catching regressions before they
+reached production.
+
+## What I'd do differently
+
+TODO.

@@ -1,0 +1,87 @@
+## Where it fits in Soundboard
+
+This is the tax preparation side of Soundboard. It reads client-provided information, prior
+returns, QuickBooks profit-and-loss and balance-sheet data, and IRS business activity code
+lookups, and writes a filing-ready IRS Form 1120-S output that a CPA reviews before filing.
+
+## Problem and origin
+
+Preparing a Form 1120-S return requires resolving dozens of interdependent line items, each
+needing its own mix of calculations, prior-year carryforwards, extracted source documents,
+QuickBooks financials, and current IRS guidance. Normally a CPA assembles and cross-references
+all of this by hand. I built an autonomous agent pipeline to handle it end to end.
+
+## Constraints
+
+Tax filings carry real financial and legal consequences, so every suggestion has to be
+traceable to a real source and every execution has to be auditable. Document retrieval also
+has to stay scoped to the requesting client's own documents, regardless of what the model
+requests, since this runs across multiple clients' financial data.
+
+## Architecture
+
+TypeScript orchestrates the pipeline; Python handles LLM execution, document extraction,
+RAG/web retrieval, and learning-case embeddings. A run starts asynchronously: the system loads
+the configured line items for the form, builds a dependency graph from each item's declared
+dependencies, detects cycles, and topologically sorts everything into batches so a line item
+only runs once its dependencies are resolved. Independent items in the same batch process in
+parallel.
+
+Line items are dispatched by type. Purely deterministic ones (calculations over dependency
+results, values carried forward from prior line items, client-provided info pulled straight
+from request context) never touch an LLM at all. Everything else routes through the AI agent
+pipeline: the system executes that item's configured sources, builds a pattern fingerprint from
+the source outputs, retrieves similar past expert-corrected cases through a learning loop, and
+assembles a full prompt combining form and client context, live source outputs, retrieved
+expert examples, and QuickBooks-derived calculations. That prompt goes to a Python service that
+selects among OpenAI, Anthropic, or Google models, runs the completion, and returns a
+structured suggestion with reasoning and a confidence level.
+
+Most line items resolve through prefetched sources: client-provided information, dependent
+line-item results from the same run, extracted prior-return and tax-form data, IRS business
+activity code lookups, and QuickBooks-derived profit-and-loss and balance-sheet mappings. A
+subset of line items only occasionally need document retrieval or live web search, cases like
+an unusual election or guidance that's shifted since standard context was assembled. For those,
+document search and web search are exposed as scoped tools the model can call mid-run instead
+of always fetching speculatively. Each tool has a narrow input schema, document results are
+filtered server-side to the requesting client's own documents, and web search is restricted to
+IRS and other authoritative sources. On-demand calls are capped at two per line item.
+
+Uploaded documents are processed by type: actual tax forms go through OCR-based extraction into
+structured line items, while statements, receipts, and correspondence go through a RAG
+pipeline (chunked, embedded, and stored in Qdrant for retrieval during line item processing).
+The on-demand document tool runs hybrid search, dense retrieval fused with sparse
+(keyword/exact-match) retrieval, so exact values like an EIN or a specific dollar figure aren't
+missed by semantic similarity alone. Both the on-demand tool and the learning loop over-fetch a
+wider candidate set and re-rank with a cross-encoder before anything reaches the prompt.
+
+When a reviewer corrects an AI suggestion, that feedback is normalized, validated, and stored
+as a learning case with its own vector embedding. Future runs on similar line items retrieve
+those past corrections, re-rank them, and inject the top matches into the prompt as examples,
+so the agent's suggestions improve from real expert feedback over time.
+
+## Key decisions and tradeoffs
+
+Keeping the deterministic/LLM split at the line-item level, rather than routing the whole
+return through the model, meant math is always computed in code and the model only handles
+judgment calls that genuinely require it. Scoping on-demand tools tightly (narrow schemas,
+per-client document filtering, a two-call cap) traded some flexibility for latency control and
+a much smaller cross-client data-leakage surface.
+
+## Evaluation and reliability
+
+Every execution, including on-demand tool calls, is logged in a dedicated audit record: raw
+request/response, token usage, cost, and confidence, tagged so a suggestion can be traced back
+to whether it relied on prefetched context or agent-retrieved context. Separately, using logged
+pre- and post-rerank candidates from the validation set, I ran an offline retrieval evaluation,
+scoring precision and recall on what was retrieved independent of whether the final output was
+correct, since a line item can land on the right number even when retrieval surfaced weak
+context.
+
+## Results
+
+Validated against 35 CPA-prepared returns, with matching output in 34 cases.
+
+## What I'd do differently
+
+TODO.
