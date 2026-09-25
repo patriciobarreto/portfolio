@@ -1,0 +1,91 @@
+## Where it fits in Soundboard
+
+This is the other half of client operations, alongside the client summary pipeline. It reads
+the current conversation thread and the firm's own precedent corpus, and writes a drafted
+client reply for an admin to review, edit, or discard before it ever reaches a client.
+
+## Problem and origin
+
+Admins were drafting every client reply from scratch, in a regulated domain where a wrong
+answer has real financial and legal consequences. I built a retrieval-augmented system that
+drafts high-quality, on-brand client communications instantly, grounded in the firm's own
+historical precedent, with a full audit trail.
+
+## Constraints
+
+Every draft has to be grounded in real precedent, never invented or hallucinated as fact, and
+never contaminated by the system's own prior output. Redaction has to happen before any client
+message becomes shared precedent, so another client's data can never leak across accounts. A
+human has to stay the last word on every message before a client sees it.
+
+## Architecture
+
+The platform is a dual-service, purpose-separated architecture: a TypeScript service
+(Express, Prisma, PostgreSQL) owns orchestration, durable state, the database of record, and
+feedback capture; a Python service (FastAPI) owns all AI operations, embeddings, retrieval, and
+generation.
+
+The pipeline runs as one fused server call: read the full thread context, construct a
+style-aware query (client voice versus admin voice, fresh reply versus proactive follow-up),
+run dense retrieval across the firm's precedent corpus, score confidence as strong, moderate,
+or weak, generate a grounded draft from real precedent and the real thread, and hand it to the
+admin to accept, edit, or discard. Every outcome is captured automatically and the sent message
+becomes tomorrow's precedent.
+
+Retrieval is multi-tier: a single query runs concurrently across client-scoped,
+entity-type-scoped, tax-year-scoped, and fully unscoped searches, ranked by a fused score
+rather than tier order alone, since a strong match at a looser tier can outrank a weak match at
+a stricter one. Every tier enforces a hard similarity floor. If nothing clears it, the system
+reports "no strong precedent found" rather than forcing a low-confidence match. The engine also
+distinguishes terse, instruction-style admin queries from natural, conversational client
+queries and routes each to the vector space that matches its linguistic register, and it
+recognizes when an admin wants a proactive follow-up with no fresh client question to reply to,
+rerouting the whole retrieval and generation strategy accordingly.
+
+On generation, the model always drafts, even with zero precedent, surfacing weak grounding
+through the confidence tier rather than refusing outright. Every specific fact, figure, date,
+or account detail must come from the current conversation or the admin's own notes, precedent
+text is guidance for tone and structure only, and the model is explicitly instructed to
+recognize and never reproduce another client's redacted placeholder tokens.
+
+On privacy, legal names, first names, last names, trailing initials, and business names are
+automatically detected and redacted before any message becomes shared precedent. The system is
+also architecturally incapable of citing its own prior AI-generated output as precedent: any
+precedent traced back to an accepted or edited AI suggestion is automatically excluded from
+future retrieval, a guard against silent quality drift.
+
+## Key decisions and tradeoffs
+
+I deliberately engineered the improvement loop around provider-independent, human-governed
+calibration rather than any single vendor's fine-tuning offering. Every suggestion is logged
+with its full retrieval evidence, every admin action (accept, edit, or let it lapse) is
+captured automatically, and an edit-distance measurement turns "was this any good?" into an
+objective signal that a calibration reporting engine aggregates against live confidence
+thresholds. A human expert reviews the report and tunes the live configuration, a fast,
+reversible adjustment with no dependency on third-party retraining infrastructure. The
+tradeoff is that improvement is gated on a human review step rather than fully automatic, which
+is the point: no unsupervised self-learning from the system's own output.
+
+## Evaluation and reliability
+
+Every retrieval and generation call is wrapped in structured observability spans capturing
+similarity thresholds, tier counts, token usage, latency, and cost. Every suggestion request
+carries an idempotency key, so retries from a flaky connection or a double-click are safe with
+no duplicate generation cost. The default posture is zero-retry, fast-timeout, so a single
+request can't silently multiply LLM spend, and suggestions an admin never acts on are
+automatically expired on a rolling schedule. Every payload between the two services is
+schema-validated end to end.
+
+## Results
+
+Live in production, actively drafting real client communications. The feedback-capture and
+calibration-reporting infrastructure is fully deployed and already recording real admin
+interactions (accept/edit outcomes, quantified edit distances, and precedent lineage), building
+the dataset the calibration loop is designed to act on. No accept-rate or edit-distance outcome
+metric yet; that lands once enough real usage data accumulates.
+
+## What I'd do differently
+
+Accumulate enough real-world feedback volume to drive the first data-backed threshold
+calibration, extend structured feedback capture to the reject pathway for a complete quality
+picture, and expand golden-set backtesting coverage as the precedent corpus grows.

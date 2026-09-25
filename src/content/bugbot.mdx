@@ -1,0 +1,74 @@
+## Where it fits in Soundboard
+
+This is internal engineering infrastructure, not a client-facing feature. It reads from Vercel
+(which hosts the full Next.js app, including the TypeScript backend, so it's the source for
+backend errors) and DataDog (client-side real user monitoring, so it's the source for frontend
+visibility), and writes a daily digest that only I read.
+
+## Problem and origin
+
+As the sole engineer at Soundboard, I'm the only one catching and triaging production errors,
+so anything I miss just stays missed. I built BugBot to solve that: a two-stage pipeline that
+ingests and clusters errors continuously, then runs an on-demand analysis pass that turns
+clustered activity into a prioritized, pre-explained digest instead of scattered raw alerts.
+
+## Constraints
+
+With no one else watching for errors, the pipeline has to be automatic and has to avoid alert
+fatigue: recurring instances of the same bug can't each generate a fresh alert. Code-context
+lookup for the LLM analysis had to be deterministic, not best-effort string matching, or the
+analysis quality would be inconsistent.
+
+## Architecture
+
+A TypeScript service owns ingestion, orchestration, and persistence; a separate Python service
+owns the LLM call.
+
+Stage 1 is continuous ingestion and clustering: incoming errors are normalized, stripping
+instance-specific noise like UUIDs, timestamps, and IPs, then fingerprinted so structurally
+identical errors hash the same way and group into one cluster with an occurrence count, rather
+than treating every recurrence as a new bug. A separate event hash rejects duplicate ingestion
+from webhook retries.
+
+Stage 2 is on-demand analysis per cluster: a cron job triggers this every morning against the
+previous day's clustered activity. Running per cluster rather than per log line avoids
+re-analyzing the same recurring bug over and over. Before the LLM sees anything, the pipeline
+fetches relevant code context from GitHub. I engineered the error messages themselves to make
+this reliable: every error carries a `[file:function]` tag baked in, so the lookup is a
+deterministic, precise query rather than best-effort string matching. GitHub returns the
+function body, capped at 5,000 characters. If the lookup fails or GitHub is unavailable, the
+pipeline continues without code context rather than blocking, the same graceful-degradation
+approach I use across my other agent work.
+
+The prompt is built from the cluster summary, up to 3 sample logs, and the code context. The
+model returns a structured response, not prose: root cause, an action category (fix now,
+monitor, needs info, false positive), a confidence level, files to modify, a risk assessment,
+and a summary. That structured contract is what makes the output machine-actionable and feeds
+directly into the digest.
+
+Results compile into an HTML digest grouped by action category, distinguishing genuinely new
+issues from recurring ones based on prior run history, and it goes out automatically each
+morning.
+
+## Key decisions and tradeoffs
+
+Fingerprint-based clustering, rather than alerting on every occurrence, trades immediate
+per-event visibility for a digest that's actually readable and prioritized. Baking a
+`[file:function]` tag directly into error messages instead of relying on keyword search over
+the codebase made code-context retrieval deterministic instead of a source of flaky results.
+
+## Evaluation and reliability
+
+Graceful degradation is built in at the code-context step: if the GitHub lookup fails or
+GitHub is unavailable, the pipeline continues without code context rather than blocking the
+whole analysis run.
+
+## Results
+
+Cut manual triage time by about 30%. Designed and built solo end to end, from webhook
+ingestion and fingerprint-based deduplication through the LLM analysis contract to digest
+delivery.
+
+## What I'd do differently
+
+TODO.
