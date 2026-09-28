@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { PRIMARY_PILL_CLASS } from "./pillStyles";
 
@@ -29,13 +30,33 @@ export function EmailButton({ href }: { href: string }) {
   }
 
   return (
-    <>
+    <div className="relative inline-block">
       <button type="button" onClick={handleCopy} className={PRIMARY_PILL_CLASS}>
-        {status === "copied" ? "Copied" : email}
+        {email}
       </button>
+      {/* Absolutely positioned (out of flow) so it can't affect layout
+          anywhere — Intro vertically centers its whole content block, so
+          even growing the row's height by a couple pixels shifted the
+          entire headline up to stay centered. Given its own pill background
+          and elevation rather than floating as bare text, since on narrow
+          viewports where GitHub/LinkedIn/Resume wrap onto the next line it
+          sits over them; the pill keeps it legible either way. */}
+      <AnimatePresence>
+        {status === "copied" && (
+          <motion.span
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.12 }}
+            className="absolute top-full left-1/2 z-10 mt-2 -translate-x-1/2 whitespace-nowrap rounded-full border border-ink/10 bg-background px-3 py-1 text-sm text-ink/70 shadow-sm shadow-ink/5 dark:border-paper/10 dark:bg-ink dark:text-paper/70"
+          >
+            Copied
+          </motion.span>
+        )}
+      </AnimatePresence>
       <span aria-live="polite" className="sr-only">
         {status === "copied" ? "Email address copied to clipboard" : ""}
       </span>
-    </>
+    </div>
   );
 }

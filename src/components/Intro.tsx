@@ -2,7 +2,7 @@ import { ContactLinks } from "./ContactLinks";
 
 export function Intro() {
   return (
-    <section id="hero" className="page-gutter flex min-h-[calc(72dvh-4rem)] w-full flex-col justify-center">
+    <section id="hero" className="page-gutter flex min-h-[calc(100dvh-4rem)] w-full flex-col justify-center">
       <h1 className="max-w-3xl text-balance text-6xl font-semibold tracking-tight text-ink md:text-7xl dark:text-paper">
         Patricio Barreto
       </h1>
