@@ -33,10 +33,43 @@ body {
   color: var(--foreground);
 }
 
-/* Full-width layout gutter: 20px on small screens up to 80px on large ones. */
+/* Full-width layout gutter: 80px by default, 20px on mobile/small screens. */
 .page-gutter {
-  padding-left: clamp(1.25rem, 5vw, 5rem);
-  padding-right: clamp(1.25rem, 5vw, 5rem);
+  padding-left: 5rem;
+  padding-right: 5rem;
+}
+
+@media (max-width: 640px) {
+  .page-gutter {
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+  }
+}
+
+/* Header's own horizontal padding: matches .page-gutter at rest (80px
+   desktop / 20px mobile), animating down to a flat 20px as the header
+   shrinks into its floating-pill form. --gutter-progress (0-1) is set
+   inline from the same scroll-linked value that drives the rest of the
+   header's shape, so this stays perfectly in sync, no separate motion
+   value needed. On mobile the resting value already is 20px, so there's
+   nothing to animate there. */
+.nav-gutter {
+  padding-left: calc(5rem - var(--gutter-progress, 0) * 3.75rem);
+  padding-right: calc(5rem - var(--gutter-progress, 0) * 3.75rem);
+  /* --nav-radius (px) already accounts for the pill clamp; applied via a
+     custom property rather than Motion's `borderRadius` style key so it
+     doesn't fight with the dropdown-open override below. */
+  border-top-left-radius: calc(var(--nav-radius, 0) * 1px);
+  border-top-right-radius: calc(var(--nav-radius, 0) * 1px);
+  border-bottom-left-radius: calc(var(--nav-radius, 0) * 1px);
+  border-bottom-right-radius: calc(var(--nav-radius, 0) * 1px);
+}
+
+@media (max-width: 640px) {
+  .nav-gutter {
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
